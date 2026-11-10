@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: painel-investimentos:1.0.0
+    container_name: painel-investimentos-api
+    ports:
+      - "8080:8080"
+    environment:
+      QUARKUS_DATASOURCE_JDBC_URL: "jdbc:sqlite:/data/investimentos.db?journal_mode=WAL&busy_timeout=10000"
+      APP_JWT_ISSUER: "painel-investimentos"
+      APP_JWT_TTL_SECONDS: "3600"
+      QUARKUS_LOG_LEVEL: "INFO"
+    volumes:
+      - dados-investimentos:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/q/health/ready || exit 1"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  dados-investimentos:
+    name: painel-investimentos-dados
