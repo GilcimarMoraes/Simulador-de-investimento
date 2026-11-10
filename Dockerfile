@@ -27,13 +27,10 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /build/target/quarkus-app/ ./
 
-RUN mkdir -p /data && chown app:app /data
-
 USER app
 EXPOSE 8080
 
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError --enable-native-access=ALL-UNNAMED" \
-    QUARKUS_DATASOURCE_JDBC_URL="jdbc:sqlite:/data/investimentos.db?journal_mode=WAL&busy_timeout=10000"
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/q/health/ready || exit 1

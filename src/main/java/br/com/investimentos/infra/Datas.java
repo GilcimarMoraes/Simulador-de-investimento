@@ -2,42 +2,29 @@ package br.com.investimentos.infra;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 
 /**
- * Formato unico de data/hora persistido no SQLite: ISO-8601 UTC com milissegundos.
+ * Conversao entre os tipos temporais do dominio (Instant/LocalDate) e os tipos do PostgreSQL.
  *
- * <p>O formato tem tamanho fixo, o que torna a ordenacao e os filtros por intervalo
- * corretos em comparacoes lexicograficas no SQL (inclusive para chaves de indice).</p>
+ * <p>Todo instante e gravado como {@code TIMESTAMPTZ} em UTC; datas de negocio usam {@code DATE}.</p>
  */
 public final class Datas {
-
-    private static final DateTimeFormatter FORMATO =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
     private Datas() {
     }
 
-    public static String formatar(Instant instante) {
-        return FORMATO.format(instante);
+    public static OffsetDateTime paraTimestamp(Instant instante) {
+        return instante.atOffset(ZoneOffset.UTC);
     }
 
-    public static Instant ler(String valor) {
-        return Instant.parse(valor);
+    public static Instant paraInstante(OffsetDateTime timestamp) {
+        return timestamp.toInstant();
     }
 
-    /** Primeiro instante do dia (UTC), usado como limite inferior inclusivo. */
-    public static String inicioDoDia(LocalDate dia) {
-        return FORMATO.format(dia.atStartOfDay(ZoneOffset.UTC).toInstant());
-    }
-
-    /** Primeiro instante do dia seguinte (UTC), usado como limite superior exclusivo. */
-    public static String fimDoDiaExclusivo(LocalDate dia) {
-        return FORMATO.format(dia.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant());
-    }
-
-    public static LocalDate diaDe(String dataHora) {
-        return LocalDate.parse(dataHora.substring(0, 10));
+    /** Primeiro instante do dia (UTC), usado como limite inferior inclusivo de intervalos. */
+    public static OffsetDateTime inicioDoDia(LocalDate dia) {
+        return dia.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime();
     }
 }

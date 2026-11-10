@@ -14,12 +14,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Persistencia e consultas agregadas das simulacoes realizadas. */
+/** Persistencia e consultas agregadas das simulacoes realizadas em PostgreSQL. */
 @ApplicationScoped
 public class SimulacaoRepository {
 
@@ -42,9 +42,10 @@ public class SimulacaoRepository {
                     valor_investido_centavos, valor_final_centavos, valor_final_liquido_centavos,
                     imposto_centavos, rentabilidade_efetiva_bp, prazo_meses, perfil_cliente, data_simulacao)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """;
         try (Connection conexao = dataSource.getConnection();
-             PreparedStatement ps = conexao.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+             PreparedStatement ps = conexao.prepareStatement(sql)) {
             ps.setLong(1, simulacao.clienteId());
             ps.setLong(2, simulacao.produtoId());
             ps.setString(3, simulacao.produtoNome());
@@ -56,11 +57,10 @@ public class SimulacaoRepository {
             ps.setInt(9, Dinheiro.basisPointsDe(simulacao.rentabilidadeEfetiva()));
             ps.setInt(10, simulacao.prazoMeses());
             ps.setString(11, simulacao.perfilCliente().name());
-            ps.setString(12, Datas.formatar(simulacao.dataSimulacao()));
-            ps.executeUpdate();
-            try (ResultSet chaves = ps.getGeneratedKeys()) {
-                if (chaves.next()) {
-                    return chaves.getLong(1);
+            ps.setObject(12, Datas.paraTimestamp(simulacao.dataSimulacao()));
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("id");
                 }
             }
             throw new PersistenciaException("Banco nao retornou o id da simulacao", null);
@@ -94,30 +94,30 @@ public class SimulacaoRepository {
 
     /**
      * Agrega quantidade e media de valor final por produto e dia.
-     * O agrupamento usa a data UTC gravada em {@code data_simulacao}.
+     * O dia e derivado de {@code data_simulacao} no fuso UTC, independente do timezone da sessao.
      */
     public List<AgregadoProdutoDia> porProdutoDia(LocalDate inicio, LocalDate fimExclusivo) {
         String sql = """
                 SELECT produto_nome,
-                       substr(data_simulacao, 1, 10) AS dia,
+                       (data_simulacao AT TIME ZONE 'UTC')::date AS dia,
                        COUNT(*) AS quantidade,
-                       CAST(ROUND(AVG(valor_final_centavos)) AS INTEGER) AS media_centavos
+                       ROUND(AVG(valor_final_centavos))::bigint AS media_centavos
                 FROM simulacao
                 WHERE data_simulacao >= ? AND data_simulacao < ?
-                GROUP BY produto_nome, dia
+                GROUP BY produto_nome, (data_simulacao AT TIME ZONE 'UTC')::date
                 ORDER BY dia DESC, produto_nome
                 """;
         List<AgregadoProdutoDia> agregados = new ArrayList<>();
         try (Connection conexao = dataSource.getConnection();
              PreparedStatement ps = conexao.prepareStatement(sql)) {
-            ps.setString(1, Datas.inicioDoDia(inicio));
-            ps.setString(2, Datas.inicioDoDia(fimExclusivo));
+            ps.setObject(1, Datas.inicioDoDia(inicio));
+            ps.setObject(2, Datas.inicioDoDia(fimExclusivo));
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     BigDecimal media = Dinheiro.deCentavos(rs.getLong("media_centavos"));
                     agregados.add(new AgregadoProdutoDia(
                             rs.getString("produto_nome"),
-                            LocalDate.parse(rs.getString("dia")),
+                            rs.getObject("dia", LocalDate.class),
                             rs.getLong("quantidade"),
                             media));
                 }
@@ -129,6 +129,7 @@ public class SimulacaoRepository {
     }
 
     private Simulacao mapear(ResultSet rs) throws SQLException {
+        OffsetDateTime dataSimulacao = rs.getObject("data_simulacao", OffsetDateTime.class);
         return new Simulacao(
                 rs.getLong("id"),
                 rs.getLong("cliente_id"),
@@ -142,6 +143,6 @@ public class SimulacaoRepository {
                 Dinheiro.taxaDeBasisPoints(rs.getInt("rentabilidade_efetiva_bp")),
                 rs.getInt("prazo_meses"),
                 PerfilRisco.valueOf(rs.getString("perfil_cliente")),
-                Datas.ler(rs.getString("data_simulacao")));
+                Datas.paraInstante(dataSimulacao));
     }
 }

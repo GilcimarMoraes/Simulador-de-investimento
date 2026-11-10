@@ -4,7 +4,7 @@ API REST para simulação de investimentos que calcula o **perfil de risco do cl
 seu comportamento financeiro, recomenda produtos aderentes e persiste cada simulação realizada.
 
 Projeto entregue para o desafio técnico de back-end (Java), implementado com **Quarkus 3.40.1**,
-**Java 25** e **SQLite**.
+**Java 25** e **PostgreSQL 17**.
 
 ---
 
@@ -35,7 +35,7 @@ A API cobre os requisitos do desafio:
 | Requisito | Implementação |
 |---|---|
 | Receber envelope JSON de simulação | `POST /simular-investimento` com Bean Validation |
-| Consultar parâmetros em banco SQL | Tabela `produto` no SQLite (limites de valor, prazo, taxa, risco, liquidez) |
+| Consultar parâmetros em banco SQL | Tabela `produto` no PostgreSQL (limites de valor, prazo, taxa, risco, liquidez) |
 | Validar entrada com base nos parâmetros | Validação em duas camadas: sintática (Bean Validation) e de negócio (limites do produto no banco) |
 | Filtrar produto adequado | Filtro por tipo/valor/prazo + ranking por aderência ao perfil e rentabilidade líquida |
 | Calcular simulações | Juros compostos + IR regressivo + isenção de LCI/LCA |
@@ -54,7 +54,8 @@ A API cobre os requisitos do desafio:
 
 - **Java 25** (Temurin 25.0.5) e **Quarkus 3.40.1**
 - **RESTEasy Reactive + Jackson** (`quarkus-rest-jackson`)
-- **Agroal + Narayana JTA** com JDBC puro e driver **SQLite** (`org.xerial:sqlite-jdbc`)
+- **PostgreSQL 17** com **Agroal + Narayana JTA**, JDBC puro e driver oficial
+  (`org.postgresql:postgresql`); em dev/test o **Dev Services** sobe o banco automaticamente
 - **SmallRye JWT** (emissão e validação RS256) e **Hibernate Validator**
 - **SmallRye OpenAPI + Swagger UI** e **SmallRye Health**
 - **JUnit 5 + RestAssured** para testes unitários e de integração
@@ -80,7 +81,7 @@ A aplicação é organizada em camadas simples e explícitas, sem mágica de ORM
                 │ infra/ (bootstrap do schema e seed)          │
                 └───────────────────────┬──────────────────────┘
                                         │
-                                   SQLite (WAL)
+                              PostgreSQL 17 (JDBC)
 ```
 
 Decisões de design relevantes:
@@ -108,8 +109,10 @@ docker compose up --build
 - Swagger UI: <http://localhost:8080/q/swagger-ui>
 - Health: <http://localhost:8080/q/health/ready>
 
-O banco fica no volume nomeado `painel-investimentos-dados`, portanto os dados sobrevivem a
-`docker compose down` (use `docker compose down -v` para apagar).
+O Compose sobe dois serviços: `postgres` (PostgreSQL 17) e `api`. O banco usa o volume nomeado
+`painel-investimentos-postgres`, portanto os dados sobrevivem a `docker compose down` (use
+`docker compose down -v` para apagar). O PostgreSQL também fica exposto em
+`localhost:15433` para inspeção com `psql` ou clientes gráficos.
 
 ### Opção 2 — Local
 
@@ -122,7 +125,20 @@ mvn quarkus:dev          # modo dev, porta 8080
 mvn clean package && java -jar target/quarkus-app/quarkus-run.jar
 ```
 
-O arquivo SQLite é criado automaticamente em `data/investimentos.db` (WAL habilitado).
+O modo `dev` usa **Dev Services**: se `QUARKUS_DATASOURCE_JDBC_URL` não estiver configurada, o
+Quarkus sobe um container PostgreSQL descartável automaticamente (requer Docker). Para usar um
+banco fixo, suba apenas o serviço de banco do Compose e exporte as variáveis:
+
+```bash
+docker compose up -d postgres
+export QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://localhost:15433/investimentos
+export QUARKUS_DATASOURCE_USERNAME=investimentos
+export QUARKUS_DATASOURCE_PASSWORD=investimentos
+mvn quarkus:dev
+```
+
+Sem Docker, aponte as mesmas variáveis para um PostgreSQL existente: o schema e o seed são
+criados automaticamente no primeiro start.
 
 ### Opção 3 — Makefile
 
@@ -456,9 +472,22 @@ Arredondamentos usam `BigDecimal`, `HALF_UP` e escala 2 para dinheiro; valores s
 
 ## Modelo de dados
 
-SQLite com WAL e `busy_timeout`. O schema é aplicado de forma idempotente no startup
-(`DatabaseBootstrap` + `db/schema.sql`) e os dados de demonstração usam ids fixos com
-`INSERT OR IGNORE` (`db/seed.sql`).
+PostgreSQL 17. O schema é aplicado de forma idempotente no startup (`DatabaseBootstrap` +
+`db/schema.sql`) e os dados de demonstração usam ids fixos com `ON CONFLICT DO NOTHING`
+(`db/seed.sql`). Instantes usam `TIMESTAMPTZ` (UTC), datas de negócio usam `DATE`, valores
+monetários `BIGINT` (centavos) e flags `BOOLEAN`.
+
+### Configuração do banco
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `QUARKUS_DATASOURCE_JDBC_URL` | Dev Services (dev/test) | URL JDBC, ex. `jdbc:postgresql://localhost:15433/investimentos` |
+| `QUARKUS_DATASOURCE_USERNAME` | `investimentos` | Usuário |
+| `QUARKUS_DATASOURCE_PASSWORD` | `investimentos` | Senha |
+| `APP_DB_RECREATE` | `false` | Recria as tabelas no startup (o perfil `test` usa `true`) |
+| `APP_DB_SEED` | `true` | Aplica os dados de demonstração |
+
+### Tabelas
 
 | Tabela | Papel |
 |---|---|
@@ -569,9 +598,10 @@ mvn test
 | `AutenticacaoETelemetriaTest` | integração | Login, `/auth/me`, 401, 403, agregação de telemetria |
 | `TratamentoErrosTest` | integração | JSON malformado, 404, 405, 415, correlation id |
 
-Os testes de integração sobem a aplicação com o perfil `test`, que recria o banco em
-`target/test-investimentos.db` e usa porta HTTP aleatória (`quarkus.http.test-port=0`) para não
-conflitar com uma instância local.
+Os testes de integração sobem a aplicação com o perfil `test`, que usa um PostgreSQL efêmero
+via **Dev Services** (Docker), recria as tabelas (`app.db.recreate=true`) e usa porta HTTP
+aleatória (`quarkus.http.test-port=0`) para não conflitar com uma instância local. Para rodar
+sem Dev Services, exporte `QUARKUS_DATASOURCE_JDBC_URL`/`USERNAME`/`PASSWORD` antes do `mvn test`.
 
 ---
 
@@ -611,19 +641,19 @@ painel-investimentos/
 
 | Decisão | Motivo |
 |---|---|
-| **SQLite** | Permitido pelo enunciado e elimina dependência externa no `docker compose`, mantendo o foco na API. O acesso é JDBC parametrizado; migrar para SQL Server/PostgreSQL exige trocar driver/dialeto e o schema, sem alterar serviços. |
-| **JDBC puro em vez de ORM** | Schema e consultas explícitos, startup rápido, zero surpresas de dialeto com SQLite. O custo é mais código de mapeamento. |
+| **PostgreSQL 17** | Banco relacional escolhido para a entrega. Tipos nativos (`TIMESTAMPTZ`, `DATE`, `BOOLEAN`), transações, concorrência e pool de conexões — pronto para múltiplas instâncias, ao contrário de um arquivo local. |
+| **JDBC puro em vez de ORM** | Schema e consultas explícitos e revisáveis, sem mapeamento implícito. O custo é mais código de mapeamento; em troca, o SQL é portável e o comportamento previsível. |
 | **Dinheiro em centavos / taxas em basis points** | Precisão determinística em cálculos e agregações (`AVG`, somas) sem `double`. |
 | **`valorFinal` bruto + campos líquidos** | Compatibilidade com o envelope de exemplo do enunciado **e** transparência tributária. |
 | **Perfil calculado on-line** | O perfil é sempre derivado do comportamento atual; não há cache nem perfil "declarado" que possa divergir dos dados. |
 | **Simulação não bloqueia risco incompatível** | O desafio pede o produto que atende valor/prazo/tipo; bloquear por perfil impediria simulações legítimas. A divergência é sinalizada em `alertas`. |
 | **401 sem corpo** | A falha de autenticação ocorre na camada HTTP do Quarkus (antes do roteamento REST), que responde 401 + `WWW-Authenticate`; os demais erros usam Problem Details. |
-| **Fila única no SQLite (`max-size=1`)** | Evita `SQLITE_BUSY` e garante consistência; suficiente para o volume do desafio. |
+| **Pool de conexões (`min=2`, `max=10`)** | Aproveita a concorrência do PostgreSQL sem esgotar conexões; o pool é gerenciado pelo Agroal. |
 | **Sem paginação em `/simulacoes`** | O enunciado pede "todas as simulações"; o filtro por cliente já limita o volume. |
 
 ### Limitações conhecidas
 
-- SQLite é single-writer: não é adequado para múltiplas réplicas horizontais.
+- Os testes de integração usam Dev Services e, portanto, exigem Docker (ou um PostgreSQL externo apontado por variáveis de ambiente).
 - Usuários e chaves JWT de demonstração estão no repositório (documentado acima).
 - Não há controle de propriedade por cliente (qualquer `USER` consulta qualquer `clienteId`).
   Em um cenário real, o `cliente_id` do token deve ser comparado com o recurso solicitado.
@@ -634,7 +664,7 @@ painel-investimentos/
 
 ## Evoluções sugeridas
 
-1. **Migrar para PostgreSQL/SQL Server** com Flyway e pool de conexões real.
+1. **Versionamento de schema com Flyway/Liquibase** e migrações automatizadas em produção.
 2. **Keycloak/OAuth2** com JWKS e remoção do endpoint de token local.
 3. **ABAC/ownership**: validar `cliente_id` do token contra o recurso e adicionar escopos.
 4. **OpenTelemetry** para métricas/traces e agregação assíncrona de telemetria.

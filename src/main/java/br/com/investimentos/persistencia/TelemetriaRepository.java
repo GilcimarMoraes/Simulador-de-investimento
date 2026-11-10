@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,7 +40,7 @@ public class TelemetriaRepository {
             ps.setInt(4, registro.status());
             ps.setLong(5, registro.duracaoMs());
             ps.setString(6, registro.usuario());
-            ps.setString(7, Datas.formatar(registro.dataHora()));
+            ps.setObject(7, Datas.paraTimestamp(registro.dataHora()));
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new PersistenciaException("Falha ao registrar telemetria", e);
@@ -48,18 +49,18 @@ public class TelemetriaRepository {
 
     /**
      * Agrega volume, tempo medio, p95, tempo maximo e erros por servico no periodo.
-     * O p95 e calculado por posicao na lista ordenada de duracoes (sem funcao de percentil nativa).
+     * O p95 e calculado por posicao na lista ordenada de duracoes.
      */
     public List<ServicoTelemetria> agregar(LocalDate inicio, LocalDate fimExclusivo) {
-        String inicioIso = Datas.inicioDoDia(inicio);
-        String fimIso = Datas.inicioDoDia(fimExclusivo);
+        OffsetDateTime inicioTimestamp = Datas.inicioDoDia(inicio);
+        OffsetDateTime fimTimestamp = Datas.inicioDoDia(fimExclusivo);
         String sql = """
                 SELECT servico,
                        COUNT(*) AS quantidade,
-                       CAST(ROUND(AVG(duracao_ms)) AS INTEGER) AS media,
+                       ROUND(AVG(duracao_ms))::bigint AS media,
                        MIN(duracao_ms) AS minimo,
                        MAX(duracao_ms) AS maximo,
-                       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS erros
+                       COUNT(*) FILTER (WHERE status >= 400) AS erros
                 FROM requisicao_log
                 WHERE data_hora >= ? AND data_hora < ?
                 GROUP BY servico
@@ -68,8 +69,8 @@ public class TelemetriaRepository {
         List<ServicoTelemetria> servicos = new ArrayList<>();
         try (Connection conexao = dataSource.getConnection();
              PreparedStatement ps = conexao.prepareStatement(sql)) {
-            ps.setString(1, inicioIso);
-            ps.setString(2, fimIso);
+            ps.setObject(1, inicioTimestamp);
+            ps.setObject(2, fimTimestamp);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String servico = rs.getString("servico");
@@ -78,7 +79,7 @@ public class TelemetriaRepository {
                             servico,
                             quantidade,
                             rs.getLong("media"),
-                            p95(conexao, servico, inicioIso, fimIso, quantidade),
+                            p95(conexao, servico, inicioTimestamp, fimTimestamp, quantidade),
                             rs.getLong("maximo"),
                             rs.getLong("erros")));
                 }
@@ -89,8 +90,8 @@ public class TelemetriaRepository {
         }
     }
 
-    private long p95(Connection conexao, String servico, String inicio, String fim, long quantidade)
-            throws SQLException {
+    private long p95(Connection conexao, String servico, OffsetDateTime inicio, OffsetDateTime fim,
+                     long quantidade) throws SQLException {
         if (quantidade <= 0) {
             return 0;
         }
@@ -103,8 +104,8 @@ public class TelemetriaRepository {
                 """;
         try (PreparedStatement ps = conexao.prepareStatement(sql)) {
             ps.setString(1, servico);
-            ps.setString(2, inicio);
-            ps.setString(3, fim);
+            ps.setObject(2, inicio);
+            ps.setObject(3, fim);
             ps.setInt(4, posicao);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong("duracao_ms") : 0;

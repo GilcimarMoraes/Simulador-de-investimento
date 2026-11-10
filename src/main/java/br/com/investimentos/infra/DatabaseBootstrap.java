@@ -12,8 +12,6 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -21,11 +19,12 @@ import java.sql.Statement;
 import java.util.List;
 
 /**
- * Inicializacao do banco: cria o diretorio do arquivo SQLite, aplica o schema e os dados de
- * demonstracao e cadastra os usuarios da API (senhas com PBKDF2, nunca em texto puro).
+ * Inicializacao do banco PostgreSQL: aplica o schema e os dados de demonstracao e cadastra os
+ * usuarios da API (senhas com PBKDF2, nunca em texto puro).
  *
  * <p>O schema e idempotente (CREATE TABLE IF NOT EXISTS) e o seed usa ids fixos com
- * INSERT OR IGNORE, portanto reiniciar a aplicacao preserva os dados ja gravados.</p>
+ * ON CONFLICT DO NOTHING, portanto reiniciar a aplicacao preserva os dados ja gravados.
+ * Em testes, {@code app.db.recreate=true} recria as tabelas a cada execucao.</p>
  */
 @ApplicationScoped
 public class DatabaseBootstrap {
@@ -41,9 +40,6 @@ public class DatabaseBootstrap {
     @Inject
     PasswordHasher passwordHasher;
 
-    @ConfigProperty(name = "quarkus.datasource.jdbc.url")
-    String urlJdbc;
-
     @ConfigProperty(name = "app.db.recreate", defaultValue = "false")
     boolean recriar;
 
@@ -51,13 +47,12 @@ public class DatabaseBootstrap {
     boolean semear;
 
     void aoIniciar(@Observes StartupEvent evento) {
-        prepararDiretorio();
         try (Connection conexao = dataSource.getConnection()) {
             conexao.setAutoCommit(false);
             if (recriar) {
                 LOG.warn("app.db.recreate=true: recriando todas as tabelas");
                 for (String tabela : TABELAS) {
-                    executar(conexao, "DROP TABLE IF EXISTS " + tabela);
+                    executar(conexao, "DROP TABLE IF EXISTS " + tabela + " CASCADE");
                 }
             }
             executarScript(conexao, lerRecurso("db/schema.sql"));
@@ -66,36 +61,9 @@ public class DatabaseBootstrap {
                 semearUsuarios(conexao);
             }
             conexao.commit();
-            LOG.info("Banco inicializado com sucesso.");
+            LOG.info("Banco PostgreSQL inicializado com sucesso.");
         } catch (SQLException e) {
-            throw new IllegalStateException("Falha ao inicializar o banco de dados SQLite", e);
-        }
-    }
-
-    /**
-     * O driver SQLite nao cria o diretorio do arquivo. Como o pool abre a conexao somente
-     * quando solicitado, garantimos o diretorio antes da primeira conexao.
-     */
-    private void prepararDiretorio() {
-        if (urlJdbc == null || !urlJdbc.startsWith("jdbc:sqlite:")) {
-            return;
-        }
-        String caminho = urlJdbc.substring("jdbc:sqlite:".length());
-        int interrogacao = caminho.indexOf('?');
-        if (interrogacao >= 0) {
-            caminho = caminho.substring(0, interrogacao);
-        }
-        if (caminho.isBlank() || caminho.startsWith(":memory:") || caminho.startsWith("file:")) {
-            return;
-        }
-        Path arquivo = Path.of(caminho).toAbsolutePath();
-        Path diretorio = arquivo.getParent();
-        if (diretorio != null) {
-            try {
-                Files.createDirectories(diretorio);
-            } catch (IOException e) {
-                throw new IllegalStateException("Nao foi possivel criar o diretorio do banco: " + diretorio, e);
-            }
+            throw new IllegalStateException("Falha ao inicializar o banco de dados PostgreSQL", e);
         }
     }
 
@@ -107,8 +75,8 @@ public class DatabaseBootstrap {
 
     private void criarUsuario(Connection conexao, String username, String senha, String roles, Long clienteId)
             throws SQLException {
-        String sql = "INSERT OR IGNORE INTO usuario (username, senha_hash, roles, cliente_id, ativo) "
-                + "VALUES (?, ?, ?, ?, 1)";
+        String sql = "INSERT INTO usuario (username, senha_hash, roles, cliente_id, ativo) "
+                + "VALUES (?, ?, ?, ?, TRUE) ON CONFLICT (username) DO NOTHING";
         try (PreparedStatement ps = conexao.prepareStatement(sql)) {
             ps.setString(1, username);
             ps.setString(2, passwordHasher.gerar(senha));

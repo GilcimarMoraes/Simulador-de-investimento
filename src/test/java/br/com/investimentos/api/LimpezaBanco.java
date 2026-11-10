@@ -20,8 +20,7 @@ public class LimpezaBanco {
     public void executar() {
         try (Connection conexao = dataSource.getConnection();
              Statement statement = conexao.createStatement()) {
-            statement.executeUpdate("DELETE FROM requisicao_log");
-            statement.executeUpdate("DELETE FROM simulacao");
+            statement.executeUpdate("TRUNCATE TABLE simulacao, requisicao_log RESTART IDENTITY CASCADE");
         } catch (SQLException e) {
             throw new IllegalStateException("Falha ao limpar banco de teste", e);
         }

@@ -48,7 +48,7 @@ public class InvestimentoRepository {
                             valor,
                             rentabilidade,
                             Liquidez.de(rs.getString("liquidez")),
-                            LocalDate.parse(rs.getString("data"))));
+                            rs.getObject("data", LocalDate.class)));
                 }
             }
             return investimentos;

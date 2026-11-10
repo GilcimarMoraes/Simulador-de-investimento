@@ -37,15 +37,14 @@ public class UsuarioRepository {
                 List<String> papeis = roles == null || roles.isBlank()
                         ? List.of()
                         : Arrays.stream(roles.split(",")).map(String::trim).filter(r -> !r.isEmpty()).toList();
-                long cliente = rs.getLong("cliente_id");
-                Long clienteId = rs.wasNull() ? null : cliente;
+                Long clienteId = rs.getObject("cliente_id", Long.class);
                 return Optional.of(new Usuario(
                         rs.getLong("id"),
                         rs.getString("username"),
                         rs.getString("senha_hash"),
                         papeis,
                         clienteId,
-                        rs.getInt("ativo") != 0));
+                        rs.getBoolean("ativo")));
             }
         } catch (SQLException e) {
             throw new PersistenciaException("Falha ao buscar usuario " + username, e);

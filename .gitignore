@@ -1,8 +1,4 @@
 target/
-data/
-*.db
-*.db-shm
-*.db-wal
 .idea/
 *.iml
 .vscode/

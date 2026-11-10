@@ -26,7 +26,7 @@ public class MovimentacaoRepository {
         try (Connection conexao = dataSource.getConnection();
              PreparedStatement ps = conexao.prepareStatement(sql)) {
             ps.setLong(1, clienteId);
-            ps.setString(2, dataInicial.toString());
+            ps.setObject(2, dataInicial);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getInt("total") : 0;
             }

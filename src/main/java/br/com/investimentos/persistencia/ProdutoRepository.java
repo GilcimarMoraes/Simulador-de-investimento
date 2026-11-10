@@ -37,16 +37,16 @@ public class ProdutoRepository {
     }
 
     public List<Produto> listarAtivos() {
-        return consultar("SELECT " + COLUNAS + " FROM produto WHERE ativo = 1 ORDER BY id", null);
+        return consultar("SELECT " + COLUNAS + " FROM produto WHERE ativo = TRUE ORDER BY id", null);
     }
 
     public List<Produto> listarAtivosPorTipo(String tipo) {
         return consultar("SELECT " + COLUNAS + " FROM produto "
-                + "WHERE ativo = 1 AND tipo = ? ORDER BY id", tipo);
+                + "WHERE ativo = TRUE AND tipo = ? ORDER BY id", tipo);
     }
 
     public Optional<Produto> buscarAtivo(long id) {
-        String sql = "SELECT " + COLUNAS + " FROM produto WHERE ativo = 1 AND id = ?";
+        String sql = "SELECT " + COLUNAS + " FROM produto WHERE ativo = TRUE AND id = ?";
         try (Connection conexao = dataSource.getConnection();
              PreparedStatement ps = conexao.prepareStatement(sql)) {
             ps.setLong(1, id);
@@ -60,7 +60,7 @@ public class ProdutoRepository {
 
     /** Tipos distintos disponiveis, usados na mensagem de erro de tipo invalido. */
     public List<String> tiposDisponiveis() {
-        String sql = "SELECT DISTINCT tipo FROM produto WHERE ativo = 1 ORDER BY tipo";
+        String sql = "SELECT DISTINCT tipo FROM produto WHERE ativo = TRUE ORDER BY tipo";
         List<String> tipos = new ArrayList<>();
         try (Connection conexao = dataSource.getConnection();
              PreparedStatement ps = conexao.prepareStatement(sql);
@@ -110,9 +110,9 @@ public class ProdutoRepository {
                 prazoMaximoMeses,
                 Dinheiro.deCentavos(rs.getLong("valor_min_centavos")),
                 valorMaximo,
-                rs.getInt("isento_ir") != 0,
+                rs.getBoolean("isento_ir"),
                 rs.getInt("carencia_meses"),
-                rs.getInt("ativo") != 0,
+                rs.getBoolean("ativo"),
                 rs.getString("descricao"));
     }
 }
