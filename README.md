@@ -116,25 +116,24 @@ O Compose sobe dois serviços: `postgres` (PostgreSQL 17) e `api`. O banco usa o
 
 ### Opção 2 — Local
 
-Pré-requisitos: **JDK 25** e Maven 3.9+.
+Pré-requisitos: **JDK 25**, Maven 3.9+ e Docker (para o Dev Services do modo dev).
 
 ```bash
 export JAVA_HOME=/caminho/para/jdk-25
-mvn quarkus:dev          # modo dev, porta 8080
-# ou
-mvn clean package && java -jar target/quarkus-app/quarkus-run.jar
+mvn quarkus:dev          # modo dev na porta 8080
 ```
 
 O modo `dev` usa **Dev Services**: se `QUARKUS_DATASOURCE_JDBC_URL` não estiver configurada, o
-Quarkus sobe um container PostgreSQL descartável automaticamente (requer Docker). Para usar um
-banco fixo, suba apenas o serviço de banco do Compose e exporte as variáveis:
+Quarkus sobe um container PostgreSQL descartável automaticamente. Para executar o JAR empacotado
+(ou usar um banco fixo), suba apenas o serviço de banco do Compose e exporte as variáveis:
 
 ```bash
 docker compose up -d postgres
 export QUARKUS_DATASOURCE_JDBC_URL=jdbc:postgresql://localhost:15433/investimentos
 export QUARKUS_DATASOURCE_USERNAME=investimentos
 export QUARKUS_DATASOURCE_PASSWORD=investimentos
-mvn quarkus:dev
+mvn clean package -DskipTests
+java -jar target/quarkus-app/quarkus-run.jar
 ```
 
 Sem Docker, aponte as mesmas variáveis para um PostgreSQL existente: o schema e o seed são
